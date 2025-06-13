@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Chroma vector DB data folder
+chroma_store/
+
+# User data files
+me/*
+!me/.gitkeep
+
+# Environment
+.env
+.venv/
+uv.lock
+
+# VSCode settings
+.vscode/
