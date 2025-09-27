@@ -1,0 +1,59 @@
+# Ruairi Bot Configuration
+
+# OpenAI API Configuration
+openai:
+  model: "gpt-4o-mini"
+  embedding_model: "text-embedding-3-small"
+  temperature: 0.7
+  max_tokens: null  # null for no limit
+
+# Text Processing & RAG Configuration
+text_processing:
+  chunk_size: 500
+  chunk_overlap: 50
+  separators: ["\n\n", "\n", ".", " ", ""]
+
+# Vector Search Configuration
+vector_search:
+  n_results: 2
+  thesis_n_results: 2
+  qna_n_results: 1
+  qna_threshold: 0.7
+  thesis_threshold: 1.0
+
+# Chat Configuration
+chat:
+  max_iterations: 5  # Maximum tool calling iterations
+  system_name: "Ruairi Grant"
+
+# Gradio Interface Configuration
+gradio:
+  share: false
+  server_name: "127.0.0.1"
+  server_port: 7860
+  show_error: true
+  show_share_button: true
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%H:%M:%S"
+
+# File Paths (relative to project root)
+paths:
+  data_dir: "me"
+  chroma_store: "chroma_store"
+  questions_db: "questions_db.json"
+  thesis_pdf: "Thesis.pdf"
+  linkedin_pdf: "linkedin.pdf"
+  summary_txt: "summary.txt"
+
+# Application Behavior
+app:
+  # Whether to fail if thesis is missing (false = continue without thesis)
+  require_thesis: false
+  # Whether to fail if LinkedIn PDF is missing
+  require_linkedin: false
+  # Whether to validate file hashes for re-embedding
+  check_file_hashes: true

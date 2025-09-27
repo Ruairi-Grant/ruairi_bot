@@ -2,9 +2,13 @@ import fitz
 import json
 import hashlib
 import logging
+from config import get_config
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
+
+# Get configuration
+cfg = get_config()
 
 # TODO: record this somewhere persistent
 def record_user_details(email, name="Name not provided", notes="not provided"):
@@ -106,7 +110,12 @@ def handle_tool_calls(tool_calls):
     return results
 
 
-def retrieve_from_qna(openai, user_message, database, top_k=1, threshold=0.7):
+def retrieve_from_qna(openai, user_message, database, top_k=None, threshold=None):
+    if top_k is None:
+        top_k = cfg.qna_n_results
+    if threshold is None:
+        threshold = cfg.qna_threshold
+        
     try:
         embedding = openai.embeddings.create(
             input=[user_message],
@@ -125,7 +134,12 @@ def retrieve_from_qna(openai, user_message, database, top_k=1, threshold=0.7):
         logger.error(f"Q&A retrieval failed: {e}")
         return ""
     
-def retrieve_from_thesis(openai, user_message, database, top_k=2, threshold=1):
+def retrieve_from_thesis(openai, user_message, database, top_k=None, threshold=None):
+    if top_k is None:
+        top_k = cfg.thesis_n_results
+    if threshold is None:
+        threshold = cfg.thesis_threshold
+        
     try:
         embedding = openai.embeddings.create(
             input=[user_message],

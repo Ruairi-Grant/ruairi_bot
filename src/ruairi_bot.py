@@ -9,6 +9,10 @@ import utils
 from pathlib import Path
 import logging
 import sys
+from config import get_config
+
+# Initialize configuration
+cfg = get_config()
 
 # Set up logging
 def setup_logging():
@@ -88,18 +92,18 @@ except Exception as e:
     logger.error("This usually means your OPENAI_API_KEY is invalid or there's a network issue")
     raise SystemExit("Cannot start without OpenAI client")
 
-name = "Ruairi Grant"
+name = cfg.system_name
 
-# Path configuration - use relative paths from project root
+# Path configuration - use configuration and relative paths from project root
 PROJECT_ROOT = Path(__file__).parent.parent
-DATA_DIR = PROJECT_ROOT / "me"
-CHROMA_STORE_PATH = PROJECT_ROOT / "chroma_store"
+DATA_DIR = PROJECT_ROOT / str(cfg.get('paths.data_dir', 'me'))
+CHROMA_STORE_PATH = PROJECT_ROOT / str(cfg.get('paths.chroma_store', 'chroma_store'))
 
 # File paths
-QUESTIONS_DB_PATH = DATA_DIR / "questions_db.json"
-THESIS_PATH = DATA_DIR / "Thesis.pdf"
-LINKEDIN_PATH = DATA_DIR / "linkedin.pdf"
-SUMMARY_PATH = DATA_DIR / "summary.txt"
+QUESTIONS_DB_PATH = DATA_DIR / str(cfg.get('paths.questions_db', 'questions_db.json'))
+THESIS_PATH = DATA_DIR / str(cfg.get('paths.thesis_pdf', 'Thesis.pdf'))
+LINKEDIN_PATH = DATA_DIR / str(cfg.get('paths.linkedin_pdf', 'linkedin.pdf'))
+SUMMARY_PATH = DATA_DIR / str(cfg.get('paths.summary_txt', 'summary.txt'))
 
 # VectorDB setup
 try:
@@ -157,7 +161,7 @@ try:
                 try:
                     question_embedding = openai.embeddings.create(
                         input=[question],
-                        model="text-embedding-3-small"
+                        model=cfg.embedding_model
                     ).data[0].embedding
                 except Exception as e:
                     logger.error(f"Failed to embed question {i}: {e}")
@@ -222,9 +226,9 @@ try:
             # Chunk thesis
             try:
                 splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=500,
-                    chunk_overlap=50,
-                    separators=["\n\n", "\n", ".", " ", ""]
+                    chunk_size=cfg.chunk_size,
+                    chunk_overlap=cfg.chunk_overlap,
+                    separators=cfg.chunk_separators
                 )
                 chunks = splitter.split_text(thesis_text)
                 logger.info(f"Split thesis into {len(chunks)} chunks")
@@ -239,7 +243,7 @@ try:
                     try:
                         embedding = openai.embeddings.create(
                             input=[chunk],
-                            model="text-embedding-3-small"
+                            model=cfg.embedding_model
                         ).data[0].embedding
 
                         thesis_collection.add(
@@ -358,7 +362,7 @@ def chat(message, history):
 
         done = False
         response = None
-        max_iterations = 5  # Prevent infinite loops
+        max_iterations = cfg.max_iterations  # Prevent infinite loops
         iteration_count = 0
 
         while not done and iteration_count < max_iterations:
@@ -366,7 +370,7 @@ def chat(message, history):
             
             try:
                 # Call the LLM with the above prompt
-                response = openai.chat.completions.create(model="gpt-4o-mini", messages=messages, tools=tools)
+                response = openai.chat.completions.create(model=cfg.openai_model, messages=messages, tools=tools)
             except Exception as e:
                 # API failure - be loud about it
                 logger.error(f"OpenAI API call failed: {e}")
