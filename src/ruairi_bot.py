@@ -6,6 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 import gradio as gr
 import utils
+from pathlib import Path
 
 # database and enviroment setup
 load_dotenv(override=True)
@@ -14,13 +15,24 @@ openai = OpenAI()
 
 name = "Ruairi Grant"
 
+# Path configuration - use relative paths from project root
+PROJECT_ROOT = Path(__file__).parent.parent
+DATA_DIR = PROJECT_ROOT / "me"
+CHROMA_STORE_PATH = PROJECT_ROOT / "chroma_store"
+
+# File paths
+QUESTIONS_DB_PATH = DATA_DIR / "questions_db.json"
+THESIS_PATH = DATA_DIR / "Thesis.pdf"
+LINKEDIN_PATH = DATA_DIR / "linkedin.pdf"
+SUMMARY_PATH = DATA_DIR / "summary.txt"
+
 # VectorDB setup
-chroma_client = chromadb.PersistentClient(path="chroma_store")
+chroma_client = chromadb.PersistentClient(path=str(CHROMA_STORE_PATH))
 
 # init Q&A chroma collection
 interview_collection = chroma_client.get_or_create_collection("interview_qna")
 
-file_hash = utils.get_file_hash(r"C:\dev\messing\ruairi-bot\me\questions_db.json")
+file_hash = utils.get_file_hash(QUESTIONS_DB_PATH)
 stored_hash = utils.get_stored_file_hash(interview_collection, doc_type="interview_qna")
 
 if file_hash == stored_hash:
@@ -35,7 +47,7 @@ else:
         interview_collection.delete(ids=real_ids)
             
     # Load Q&A data from JSON
-    with open(r"C:\dev\messing\ruairi-bot\me\questions_db.json", "r") as f:
+    with open(QUESTIONS_DB_PATH, "r") as f:
         qna_data = json.load(f)
 
     # Add Q&A documents to a chroma collection
@@ -60,7 +72,7 @@ else:
 # Init theisis chroma collection
 thesis_collection = chroma_client.get_or_create_collection("thesis_chunks")
 
-file_hash = utils.get_file_hash(r"C:\dev\messing\ruairi-bot\me\Thesis.pdf")
+file_hash = utils.get_file_hash(THESIS_PATH)
 stored_hash = utils.get_stored_file_hash(thesis_collection, doc_type="thesis")
 
 if file_hash == stored_hash:
@@ -75,7 +87,7 @@ else:
         thesis_collection.delete(ids=real_ids)
 
     # Load in thesis text 
-    thesis_text = utils.extract_text_from_pdf(r"C:\dev\messing\ruairi-bot\me\Thesis.pdf")
+    thesis_text = utils.extract_text_from_pdf(THESIS_PATH)
 
     # Chunk thesis
     splitter = RecursiveCharacterTextSplitter(
@@ -103,7 +115,7 @@ else:
     utils.store_file_hash_in_chroma(thesis_collection, file_hash, doc_type='thesis')
 
 # Load in linkedin text
-reader = PdfReader(r"C:\dev\messing\ruairi-bot\me\linkedin.pdf")
+reader = PdfReader(LINKEDIN_PATH)
 linkedin = ""
 for page in reader.pages:
     text = page.extract_text()
@@ -111,7 +123,7 @@ for page in reader.pages:
         linkedin += text
 
 # Load in the pre-written summary
-with open(r"C:\dev\messing\ruairi-bot\me\summary.txt", "r", encoding="utf-8") as f:
+with open(SUMMARY_PATH, "r", encoding="utf-8") as f:
     summary = f.read()
 
 # Load in tool decriptions to provide this functionality to the model
@@ -173,7 +185,7 @@ def chat(message, history):
         \n--- PROMPT END ---\n\n \
         {response_text}"
     )
-    return debug_output
-    # return response.choices[0].message.content
+    # return debug_output
+    return response.choices[0].message.content
 
 gr.ChatInterface(chat, type="messages").launch()
