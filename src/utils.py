@@ -1,25 +1,29 @@
 import fitz
 import json
 import hashlib
+import logging
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 # TODO: record this somewhere persistent
 def record_user_details(email, name="Name not provided", notes="not provided"):
     try:
-        print(f"📧 Recording interest from {name} with email {email} and notes {notes}")
+        logger.info(f"Recording interest from {name} with email {email} and notes {notes}")
         # Here you could add actual database/file storage logic
         return {"recorded": "ok"}
     except Exception as e:
-        print(f"⚠️ Failed to record user details: {e}")
+        logger.error(f"Failed to record user details: {e}")
         return {"error": str(e)}
 
 # TODO: record this somewhere persistent
 def record_unknown_question(question):
     try:
-        print(f"❓ Recording unknown question: {question}")
+        logger.info(f"Recording unknown question: {question}")
         # Here you could add actual logging/storage logic
         return {"recorded": "ok"}
     except Exception as e:
-        print(f"⚠️ Failed to record unknown question: {e}")
+        logger.error(f"Failed to record unknown question: {e}")
         return {"error": str(e)}
 
 def is_thesis_question(message: str) -> bool:
@@ -95,7 +99,7 @@ def handle_tool_calls(tool_calls):
     for tool_call in tool_calls:
         tool_name = tool_call.function.name
         arguments = json.loads(tool_call.function.arguments)
-        print(f"Tool called: {tool_name}", flush=True)
+        logger.debug(f"Tool called: {tool_name}")
         tool = globals().get(tool_name)
         result = tool(**arguments) if tool else {}
         results.append({"role": "tool","content": json.dumps(result),"tool_call_id": tool_call.id})
@@ -111,14 +115,14 @@ def retrieve_from_qna(openai, user_message, database, top_k=1, threshold=0.7):
 
         result = database.query(query_embeddings=[embedding], n_results=top_k)
 
-        print("🔍 Q&A Search - Distances:", result['distances'])
-        print("🔍 Q&A Search - Questions:", result['documents'])
+        logger.debug("Q&A Search - Distances: %s", result['distances'])
+        logger.debug("Q&A Search - Questions: %s", result['documents'])
 
         if result['distances'][0][0] < threshold:
             return result['metadatas'][0][0]['answer']
         return ""  # No match found
     except Exception as e:
-        print(f"⚠️ Q&A retrieval failed: {e}")
+        logger.error(f"Q&A retrieval failed: {e}")
         return ""
     
 def retrieve_from_thesis(openai, user_message, database, top_k=2, threshold=1):
@@ -130,8 +134,8 @@ def retrieve_from_thesis(openai, user_message, database, top_k=2, threshold=1):
 
         result = database.query(query_embeddings=[embedding], n_results=top_k)
 
-        print("🔍 Thesis Search - Distances:", result['distances'])
-        print("🔍 Thesis Search - Found chunks:", len(result['documents'][0]))
+        logger.debug("Thesis Search - Distances: %s", result['distances'])
+        logger.debug("Thesis Search - Found chunks: %d", len(result['documents'][0]))
 
         retrieved_chunks = []
         for doc, score in zip(result['documents'][0], result['distances'][0]):
@@ -140,16 +144,16 @@ def retrieve_from_thesis(openai, user_message, database, top_k=2, threshold=1):
 
         return "\n\n".join(retrieved_chunks)
     except Exception as e:
-        print(f"⚠️ Thesis retrieval failed: {e}")
+        logger.error(f"Thesis retrieval failed: {e}")
         return ""
 
 
 def retrieve_rag_context(openai, user_message, database, top_k=2):
     if is_thesis_question(user_message):
-        print("🔍 Routing to thesis_chunks collection")
+        logger.debug("Routing to thesis_chunks collection")
         return retrieve_from_thesis(openai, user_message, database.get_collection("thesis_chunks"), top_k=top_k)
     else:
-        print("🔍 Routing to qna collection")
+        logger.debug("Routing to qna collection")
         return retrieve_from_qna(openai, user_message, database.get_collection("interview_qna"),  top_k=top_k)
     
 def extract_text_from_pdf(pdf_path):
