@@ -27,104 +27,218 @@ LINKEDIN_PATH = DATA_DIR / "linkedin.pdf"
 SUMMARY_PATH = DATA_DIR / "summary.txt"
 
 # VectorDB setup
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_STORE_PATH))
+try:
+    chroma_client = chromadb.PersistentClient(path=str(CHROMA_STORE_PATH))
+    print(f"✅ ChromaDB initialized at: {CHROMA_STORE_PATH}")
+except Exception as e:
+    print(f"💥 FATAL: Failed to initialize ChromaDB: {e}")
+    print(f"Check that the directory {CHROMA_STORE_PATH} is accessible")
+    raise SystemExit("Cannot start without database")
 
 # init Q&A chroma collection
-interview_collection = chroma_client.get_or_create_collection("interview_qna")
+try:
+    interview_collection = chroma_client.get_or_create_collection("interview_qna")
 
-file_hash = utils.get_file_hash(QUESTIONS_DB_PATH)
-stored_hash = utils.get_stored_file_hash(interview_collection, doc_type="interview_qna")
+    if not QUESTIONS_DB_PATH.exists():
+        print(f"💥 FATAL: Questions database not found at: {QUESTIONS_DB_PATH}")
+        raise SystemExit("Cannot start without questions database")
+    
+    file_hash = utils.get_file_hash(QUESTIONS_DB_PATH)
+    stored_hash = utils.get_stored_file_hash(interview_collection, doc_type="interview_qna")
 
-if file_hash == stored_hash:
-    print("Interview Q&A already embedded and unchanged.")
-else:
-    print("Interview Q&A changed or missing — re-embedding.")
+    if file_hash == stored_hash:
+        print("✅ Interview Q&A already embedded and unchanged.")
+    else:
+        print("🔄 Interview Q&A changed or missing — re-embedding...")
 
-    # Delete existing non-hash entries (leave the stored hash doc alone)
-    existing_ids = interview_collection.get()["ids"]
-    real_ids = [id for id in existing_ids if not id.startswith("__file_hash__")]
-    if real_ids:
-        interview_collection.delete(ids=real_ids)
-            
-    # Load Q&A data from JSON
-    with open(QUESTIONS_DB_PATH, "r") as f:
-        qna_data = json.load(f)
+        # Delete existing non-hash entries (leave the stored hash doc alone)
+        try:
+            existing_ids = interview_collection.get()["ids"]
+            real_ids = [id for id in existing_ids if not id.startswith("__file_hash__")]
+            if real_ids:
+                interview_collection.delete(ids=real_ids)
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to clean old embeddings: {e}")
+                
+        # Load Q&A data from JSON
+        try:
+            with open(QUESTIONS_DB_PATH, "r") as f:
+                qna_data = json.load(f)
+            print(f"📖 Loaded {len(qna_data)} Q&A pairs")
+        except json.JSONDecodeError as e:
+            print(f"💥 FATAL: Invalid JSON in questions database: {e}")
+            raise SystemExit("Questions database is corrupted")
+        except Exception as e:
+            print(f"💥 FATAL: Failed to read questions database: {e}")
+            raise SystemExit("Cannot access questions database")
 
-    # Add Q&A documents to a chroma collection
-    for i, item in enumerate(qna_data):
-        question = item['question']
-        answer = item['answer']
-        question_embedding = openai.embeddings.create(
-            input=[question],
-            model="text-embedding-3-small"
-        ).data[0].embedding
+        # Add Q&A documents to a chroma collection
+        try:
+            for i, item in enumerate(qna_data):
+                    
+                question = item['question']
+                answer = item['answer']
+                
+                try:
+                    question_embedding = openai.embeddings.create(
+                        input=[question],
+                        model="text-embedding-3-small"
+                    ).data[0].embedding
+                except Exception as e:
+                    print(f"⚠️ Warning: Failed to embed question {i}: {e}")
+                    continue
 
-        interview_collection.add(
-            documents=[question],  # List of 1 string
-            embeddings=[question_embedding],  # List of 1 embedding
-            metadatas=[{"answer": answer}],  # List of 1 dict
-            ids=[f"qna-{i}"]  # List of 1 ID
-        )
+                interview_collection.add(
+                    documents=[question],  # List of 1 string
+                    embeddings=[question_embedding],  # List of 1 embedding
+                    metadatas=[{"answer": answer}],  # List of 1 dict
+                    ids=[f"qna-{i}"]  # List of 1 ID
+                )
+            print(f"✅ Successfully embedded {len(qna_data)} Q&A pairs")
+        except Exception as e:
+            print(f"💥 FATAL: Failed to embed Q&A data: {e}")
+            raise SystemExit("Failed to setup interview collection")
 
-    # Step 4: Store updated hash
-    utils.store_file_hash_in_chroma(interview_collection, file_hash, doc_type='interview_qna')
+        # Store updated hash
+        try:
+            utils.store_file_hash_in_chroma(interview_collection, file_hash, doc_type='interview_qna')
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to store file hash: {e}")
 
-# Init theisis chroma collection
-thesis_collection = chroma_client.get_or_create_collection("thesis_chunks")
+except Exception as e:
+    print(f"💥 FATAL: Failed to setup interview collection: {e}")
+    raise SystemExit("Cannot start without interview data")
 
-file_hash = utils.get_file_hash(THESIS_PATH)
-stored_hash = utils.get_stored_file_hash(thesis_collection, doc_type="thesis")
+# Init thesis chroma collection
+try:
+    thesis_collection = chroma_client.get_or_create_collection("thesis_chunks")
+    
+    if not THESIS_PATH.exists():
+        print(f"⚠️ Warning: Thesis not found at: {THESIS_PATH}")
+        print("Thesis-related functionality will be disabled")
+        thesis_collection = None
+    else:
+        file_hash = utils.get_file_hash(THESIS_PATH)
+        stored_hash = utils.get_stored_file_hash(thesis_collection, doc_type="thesis")
 
-if file_hash == stored_hash:
-    print("Thesis already embedded and unchanged.")
-else:
-    print("thesis changed or missing — re-embedding.")
+        if file_hash == stored_hash:
+            print("✅ Thesis already embedded and unchanged.")
+        else:
+            print("🔄 Thesis changed or missing — re-embedding...")
 
-    # Delete existing non-hash entries (leave the stored hash doc alone)
-    existing_ids = thesis_collection.get()["ids"]
-    real_ids = [id for id in existing_ids if not id.startswith("__file_hash__")]
-    if real_ids:
-        thesis_collection.delete(ids=real_ids)
+            # Delete existing non-hash entries (leave the stored hash doc alone)
+            try:
+                existing_ids = thesis_collection.get()["ids"]
+                real_ids = [id for id in existing_ids if not id.startswith("__file_hash__")]
+                if real_ids:
+                    thesis_collection.delete(ids=real_ids)
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to clean old thesis embeddings: {e}")
 
-    # Load in thesis text 
-    thesis_text = utils.extract_text_from_pdf(THESIS_PATH)
+            # Load in thesis text 
+            try:
+                thesis_text = utils.extract_text_from_pdf(THESIS_PATH)
+                print(f"📖 Extracted thesis text ({len(thesis_text)} characters)")
+            except Exception as e:
+                print(f"💥 FATAL: Failed to extract text from thesis PDF: {e}")
+                print("Check that the thesis PDF is valid and readable")
+                raise SystemExit("Cannot process thesis PDF")
 
-    # Chunk thesis
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", ".", " ", ""]
-    )
-    chunks = splitter.split_text(thesis_text)
+            # Chunk thesis
+            try:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=500,
+                    chunk_overlap=50,
+                    separators=["\n\n", "\n", ".", " ", ""]
+                )
+                chunks = splitter.split_text(thesis_text)
+                print(f"📄 Split thesis into {len(chunks)} chunks")
+            except Exception as e:
+                print(f"💥 FATAL: Failed to chunk thesis text: {e}")
+                raise SystemExit("Cannot process thesis text")
 
-    # Embed and store in thesis collection
-    for i, chunk in enumerate(chunks):
-        embedding = openai.embeddings.create(
-            input=[chunk],
-            model="text-embedding-3-small"
-        ).data[0].embedding
+            # Embed and store in thesis collection
+            try:
+                successful_embeddings = 0
+                for i, chunk in enumerate(chunks):
+                    try:
+                        embedding = openai.embeddings.create(
+                            input=[chunk],
+                            model="text-embedding-3-small"
+                        ).data[0].embedding
 
-        thesis_collection.add(
-            documents=[chunk],
-            embeddings=[embedding],
-            metadatas=[{"chunk_index": i}],
-            ids=[f"thesis-{i}"]
-        )
+                        thesis_collection.add(
+                            documents=[chunk],
+                            embeddings=[embedding],
+                            metadatas=[{"chunk_index": i}],
+                            ids=[f"thesis-{i}"]
+                        )
+                        successful_embeddings += 1
+                    except Exception as e:
+                        print(f"⚠️ Warning: Failed to embed thesis chunk {i}: {e}")
+                        continue
+                        
+                print(f"✅ Successfully embedded {successful_embeddings}/{len(chunks)} thesis chunks")
+                
+                if successful_embeddings == 0:
+                    print("💥 FATAL: Failed to embed any thesis chunks")
+                    raise SystemExit("No thesis data available")
+                    
+            except Exception as e:
+                print(f"💥 FATAL: Failed to embed thesis data: {e}")
+                raise SystemExit("Failed to setup thesis collection")
 
-    # Step 4: Store updated hash
-    utils.store_file_hash_in_chroma(thesis_collection, file_hash, doc_type='thesis')
+            # Store updated hash
+            try:
+                utils.store_file_hash_in_chroma(thesis_collection, file_hash, doc_type='thesis')
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to store thesis file hash: {e}")
+
+except Exception as e:
+    print(f"💥 FATAL: Failed to setup thesis collection: {e}")
+    raise SystemExit("Cannot start without thesis processing")
 
 # Load in linkedin text
-reader = PdfReader(LINKEDIN_PATH)
-linkedin = ""
-for page in reader.pages:
-    text = page.extract_text()
-    if text:
-        linkedin += text
+try:
+    if not LINKEDIN_PATH.exists():
+        print(f"⚠️ Warning: LinkedIn PDF not found at: {LINKEDIN_PATH}")
+        linkedin = "LinkedIn profile information not available."
+    else:
+        reader = PdfReader(LINKEDIN_PATH)
+        linkedin = ""
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                linkedin += text
+        
+        if not linkedin.strip():
+            print("⚠️ Warning: LinkedIn PDF appears to be empty or unreadable")
+            linkedin = "LinkedIn profile information not available."
+        else:
+            print(f"✅ Loaded LinkedIn profile ({len(linkedin)} characters)")
+            
+except Exception as e:
+    print(f"⚠️ Warning: Failed to read LinkedIn PDF: {e}")
+    linkedin = "LinkedIn profile information not available."
 
 # Load in the pre-written summary
-with open(SUMMARY_PATH, "r", encoding="utf-8") as f:
-    summary = f.read()
+try:
+    if not SUMMARY_PATH.exists():
+        print(f"💥 FATAL: Summary file not found at: {SUMMARY_PATH}")
+        raise SystemExit("Summary file is required")
+    
+    with open(SUMMARY_PATH, "r", encoding="utf-8") as f:
+        summary = f.read()
+        
+    if not summary.strip():
+        print("💥 FATAL: Summary file is empty")
+        raise SystemExit("Summary file cannot be empty")
+        
+    print(f"✅ Loaded summary ({len(summary)} characters)")
+    
+except Exception as e:
+    print(f"💥 FATAL: Failed to read summary file: {e}")
+    raise SystemExit("Cannot start without summary")
 
 # Load in tool decriptions to provide this functionality to the model
 tools = [{"type": "function", "function": utils.record_user_details_json},
@@ -145,47 +259,120 @@ system_prompt += f"With this context, please chat with the user, always staying 
 
 # Chat callback function to orgainize the workflow to respond to a chat message
 def chat(message, history):
-    # Check if there is any relevant info in any of the collection in chroma
-    retrieved_info = utils.retrieve_rag_context(openai, message, chroma_client)
-    rag_context = f"\n\n## Retrieved Info:\n{retrieved_info}" if retrieved_info else ""
-
-    # Add the rag context to the prompt, will add nothing in case there was no suitable context found
-    full_prompt = system_prompt + rag_context
-
-    messages = [{"role": "system", "content": full_prompt}] + history + [{"role": "user", "content": message}]
-
-    done=False
-
-    while not done:
-        try:
-            # Call the LLM with the above prompt
-            response = openai.chat.completions.create(model="gpt-4o-mini", messages=messages, tools=tools)
-        except Exception as e:
-            raise RuntimeError("Failed to get completion") from e
-
-        # Check if the LLM wants to call a tool
-        finish_reason = response.choices[0].finish_reason
-         
-        if finish_reason=="tool_calls":
-            # route to the correct tool and run it. 
-            message = response.choices[0].message
-            tool_calls = message.tool_calls
-            results = utils.handle_tool_calls(tool_calls)
-            messages.append(message)
-            messages.extend(results)
-        else:
-            done = True
-
-    response_text = response.choices[0].message.content
+    try:
+        # TODO: does gradio already do this?
+        # Input validation
+        if not message or not message.strip():
+            return "❌ **Error**: Please provide a message to chat with me!"
         
-    # Debug output
-    debug_output = (
-        f"\n\n--- PROMPT START ---\n \
-        {full_prompt} \
-        \n--- PROMPT END ---\n\n \
-        {response_text}"
-    )
-    # return debug_output
-    return response.choices[0].message.content
+        # Check if there is any relevant info in any of the collection in chroma
+        try:
+            retrieved_info = utils.retrieve_rag_context(openai, message, chroma_client)
+            rag_context = f"\n\n## Retrieved Info:\n{retrieved_info}" if retrieved_info else ""
+        except Exception as e:
+            print(f"⚠️ RAG retrieval failed: {e}")
+            # Continue without RAG context
+            rag_context = ""
+            # Show warning in chat but continue
+            # We'll add this as a prefix to the final response
 
-gr.ChatInterface(chat, type="messages").launch()
+        # Add the rag context to the prompt, will add nothing in case there was no suitable context found
+        full_prompt = system_prompt + rag_context
+
+        messages = [{"role": "system", "content": full_prompt}] + history + [{"role": "user", "content": message}]
+
+        done = False
+        response = None
+        max_iterations = 5  # Prevent infinite loops
+        iteration_count = 0
+
+        while not done and iteration_count < max_iterations:
+            iteration_count += 1
+            
+            try:
+                # Call the LLM with the above prompt
+                response = openai.chat.completions.create(model="gpt-4o-mini", messages=messages, tools=tools)
+            except Exception as e:
+                # API failure - be loud about it
+                error_msg = f"🚨 **OpenAI API Error**: {str(e)}\n\n"
+                error_msg += "This could be due to:\n"
+                error_msg += "• API key issues\n"
+                error_msg += "• Rate limiting\n" 
+                error_msg += "• Network connectivity\n"
+                error_msg += "• OpenAI service outage\n\n"
+                error_msg += "Please try again in a moment. If the problem persists, check your network connection."
+                print(f"💥 OpenAI API call failed: {e}")
+                return error_msg
+
+            try:
+                # Check if the LLM wants to call a tool
+                finish_reason = response.choices[0].finish_reason
+                 
+                if finish_reason == "tool_calls":
+                    # route to the correct tool and run it. 
+                    message_obj = response.choices[0].message
+                    tool_calls = message_obj.tool_calls
+                    
+                    try:
+                        results = utils.handle_tool_calls(tool_calls)
+                        messages.append(message_obj)
+                        messages.extend(results)
+                    except Exception as e:
+                        print(f"⚠️ Tool call failed: {e}")
+                        # Return error to user but continue
+                        error_msg = "⚠️ **Tool Error**: Failed to execute tool function.\n"
+                        error_msg += f"Error: {str(e)}\n\n"
+                        error_msg += "I can still chat with you, but some functionality may not work properly."
+                        return error_msg
+                else:
+                    done = True
+                    
+            except (KeyError, IndexError, AttributeError) as e:
+                print(f"💥 Unexpected response format from OpenAI: {e}")
+                error_msg = "🚨 **Response Processing Error**: Received unexpected response format from AI service.\n"
+                error_msg += f"Technical details: {str(e)}\n\n"
+                error_msg += "Please try rephrasing your question or try again."
+                return error_msg
+
+        if iteration_count >= max_iterations:
+            print("⚠️ Hit maximum tool call iterations")
+            return "⚠️ **System Error**: The conversation got stuck in a loop. Please start a new conversation."
+
+        if not response:
+            print("💥 No response generated")
+            return "🚨 **System Error**: Failed to generate a response. Please try again."
+
+        try:
+            final_response = response.choices[0].message.content
+            if not final_response:
+                return "⚠️ **Warning**: I generated an empty response. Please try rephrasing your question."
+                
+            # Add RAG warning if retrieval failed but we continued
+            if rag_context == "" and "RAG retrieval failed" in str(locals().get('e', '')):
+                final_response = "⚠️ *Note: Some background information may be unavailable due to a database issue.*\n\n" + final_response
+                
+            return final_response
+            
+        except (KeyError, IndexError, AttributeError) as e:
+            print(f"💥 Failed to extract response content: {e}")
+            return f"🚨 **Response Extraction Error**: {str(e)}\n\nPlease try again."
+            
+    except Exception as e:
+        # Catch-all for any other unexpected errors
+        print(f"💥 Unexpected error in chat function: {e}")
+        error_msg = "🚨 **Unexpected System Error**: Something went wrong.\n"
+        error_msg += f"Error details: {str(e)}\n\n"
+        error_msg += "Please try again or refresh the page if the problem persists."
+        return error_msg
+
+# Launch the Gradio interface
+try:
+    print("🚀 Starting Gradio interface...")
+    gr.ChatInterface(chat, type="messages").launch()
+except Exception as e:
+    print(f"💥 FATAL: Failed to launch Gradio interface: {e}")
+    print("This could be due to:")
+    print("• Port already in use")
+    print("• Missing Gradio dependencies") 
+    print("• Network/firewall issues")
+    raise SystemExit("Cannot start web interface")

@@ -2,14 +2,25 @@ import fitz
 import json
 import hashlib
 
-
+# TODO: record this somewhere persistent
 def record_user_details(email, name="Name not provided", notes="not provided"):
-    print(f"Recording interest from {name} with email {email} and notes {notes}")
-    return {"recorded": "ok"}
+    try:
+        print(f"📧 Recording interest from {name} with email {email} and notes {notes}")
+        # Here you could add actual database/file storage logic
+        return {"recorded": "ok"}
+    except Exception as e:
+        print(f"⚠️ Failed to record user details: {e}")
+        return {"error": str(e)}
 
+# TODO: record this somewhere persistent
 def record_unknown_question(question):
-    print(f"Recording {question} asked that I couldn't answer")
-    return {"recorded": "ok"}
+    try:
+        print(f"❓ Recording unknown question: {question}")
+        # Here you could add actual logging/storage logic
+        return {"recorded": "ok"}
+    except Exception as e:
+        print(f"⚠️ Failed to record unknown question: {e}")
+        return {"error": str(e)}
 
 def is_thesis_question(message: str) -> bool:
     thesis_keywords = [
@@ -92,39 +103,45 @@ def handle_tool_calls(tool_calls):
 
 
 def retrieve_from_qna(openai, user_message, database, top_k=1, threshold=0.7):
-    embedding = openai.embeddings.create(
-        input=[user_message],
-        model="text-embedding-3-small"
-    ).data[0].embedding
+    try:
+        embedding = openai.embeddings.create(
+            input=[user_message],
+            model="text-embedding-3-small"
+        ).data[0].embedding
 
-    result = database.query(query_embeddings=[embedding], n_results=top_k)
+        result = database.query(query_embeddings=[embedding], n_results=top_k)
 
-    print("Distances:", result['distances'])
-    print("Questions:", result['documents'])
-    print("Answers:", result['metadatas'])
+        print("🔍 Q&A Search - Distances:", result['distances'])
+        print("🔍 Q&A Search - Questions:", result['documents'])
 
-    if result['distances'][0][0] < threshold:
-        return result['metadatas'][0][0]['answer']
-    return ""  # No match found
+        if result['distances'][0][0] < threshold:
+            return result['metadatas'][0][0]['answer']
+        return ""  # No match found
+    except Exception as e:
+        print(f"⚠️ Q&A retrieval failed: {e}")
+        return ""
     
 def retrieve_from_thesis(openai, user_message, database, top_k=2, threshold=1):
-    embedding = openai.embeddings.create(
-        input=[user_message],
-        model="text-embedding-3-small"
-    ).data[0].embedding
+    try:
+        embedding = openai.embeddings.create(
+            input=[user_message],
+            model="text-embedding-3-small"
+        ).data[0].embedding
 
-    result = database.query(query_embeddings=[embedding], n_results=top_k)
+        result = database.query(query_embeddings=[embedding], n_results=top_k)
 
-    print("Distances:", result['distances'])
-    print("Questions:", result['documents'])
-    print("Answers:", result['metadatas'])
+        print("🔍 Thesis Search - Distances:", result['distances'])
+        print("🔍 Thesis Search - Found chunks:", len(result['documents'][0]))
 
-    retrieved_chunks = []
-    for doc, score in zip(result['documents'][0], result['distances'][0]):
-        if score < threshold:
-            retrieved_chunks.append(doc)
+        retrieved_chunks = []
+        for doc, score in zip(result['documents'][0], result['distances'][0]):
+            if score < threshold:
+                retrieved_chunks.append(doc)
 
-    return "\n\n".join(retrieved_chunks)
+        return "\n\n".join(retrieved_chunks)
+    except Exception as e:
+        print(f"⚠️ Thesis retrieval failed: {e}")
+        return ""
 
 
 def retrieve_rag_context(openai, user_message, database, top_k=2):
