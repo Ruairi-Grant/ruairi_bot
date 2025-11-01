@@ -1,3 +1,4 @@
+import os
 from dotenv import load_dotenv
 from openai import OpenAI
 import json
@@ -76,8 +77,11 @@ def setup_logging():
 # Initialize logging
 logger = setup_logging()
 
-# database and enviroment setup
-load_dotenv(override=True)
+# Load .env only if not running on Hugging Face
+if not os.environ.get("SPACE_ID"):
+    load_dotenv(override=True)
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Environment variable validation
 required_env_vars = {
