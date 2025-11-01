@@ -1,4 +1,4 @@
-import fitz
+from pypdf import PdfReader
 import json
 import hashlib
 import logging
@@ -171,8 +171,10 @@ def retrieve_rag_context(openai, user_message, database, top_k=2):
         return retrieve_from_qna(openai, user_message, database.get_collection("interview_qna"),  top_k=top_k)
     
 def extract_text_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
+    reader = PdfReader(pdf_path)
     text = ""
-    for page in doc:
-        text += page.get_text()
+    for page in reader.pages:
+        page_text = page.extract_text()
+        if page_text:
+            text += page_text
     return text
