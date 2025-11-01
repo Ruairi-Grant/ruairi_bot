@@ -6,7 +6,6 @@ __pycache__/
 chroma_store/
 
 # User data files
-me/*
 !me/.gitkeep
 
 # Environment

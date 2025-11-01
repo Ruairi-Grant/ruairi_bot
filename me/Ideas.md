@@ -1,0 +1,1 @@
+Create a second chaptbot to converse with the first one and evaluate the "goodness" of the answers. then diagnose areas where the answeres could be improved
