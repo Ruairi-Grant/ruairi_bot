@@ -346,21 +346,35 @@ def chat(message, history):
         # TODO: does gradio already do this?
         # Input validation
         if not message or not message.strip():
-            return "❌ **Error**: Please provide a message to chat with me!"
+            error_msg = "❌ **Error**: Please provide a message to chat with me!"
+            if cfg.get('debug.show_prompts', False):
+                return error_msg, ""
+            return error_msg
         
         # Check if there is any relevant info in any of the collection in chroma
         try:
-            retrieved_info = utils.retrieve_rag_context(openai, message, chroma_client)
-            rag_context = f"\n\n## Retrieved Info:\n{retrieved_info}" if retrieved_info else ""
+            rag_data = utils.retrieve_rag_context(openai, message, chroma_client)
+            # Use prompt_content for the AI model (only good matches)
+            rag_context = f"\n\n## Retrieved Info:\n{rag_data['prompt_content']}" if rag_data['prompt_content'] else ""
+            # Store debug_content separately for display
+            debug_rag_content = rag_data['debug_content']
+            rag_metadata = rag_data['metadata']
         except Exception as e:
             logger.error(f"RAG retrieval failed: {e}")
             # Continue without RAG context
             rag_context = ""
+            debug_rag_content = ""
+            rag_metadata = {}
             # Show warning in chat but continue
             # We'll add this as a prefix to the final response
 
         # Add the rag context to the prompt, will add nothing in case there was no suitable context found
         full_prompt = system_prompt + rag_context
+        
+        # For debug display, show the full context with similarity scores
+        debug_prompt = system_prompt + (f"\n\n## Retrieved Info:\n{debug_rag_content}" if debug_rag_content else "")
+        
+        logger.debug(f"Full prompt being sent to model:\n{full_prompt}")
 
         messages = [{"role": "system", "content": full_prompt}] + history + [{"role": "user", "content": message}]
 
@@ -386,6 +400,8 @@ def chat(message, history):
                 error_msg += "• OpenAI service outage\n\n"
                 error_msg += "Please try again in a moment. If the problem persists, check your network connection."
                 logger.error(f"OpenAI API call failed: {e}")
+                if cfg.get('debug.show_prompts', False):
+                    return error_msg, debug_prompt
                 return error_msg
 
             try:
@@ -407,6 +423,8 @@ def chat(message, history):
                         error_msg = "⚠️ **Tool Error**: Failed to execute tool function.\n"
                         error_msg += f"Error: {str(e)}\n\n"
                         error_msg += "I can still chat with you, but some functionality may not work properly."
+                        if cfg.get('debug.show_prompts', False):
+                            return error_msg, debug_prompt
                         return error_msg
                 else:
                     done = True
@@ -416,30 +434,46 @@ def chat(message, history):
                 error_msg = "🚨 **Response Processing Error**: Received unexpected response format from AI service.\n"
                 error_msg += f"Technical details: {str(e)}\n\n"
                 error_msg += "Please try rephrasing your question or try again."
+                if cfg.get('debug.show_prompts', False):
+                    return error_msg, debug_prompt
                 return error_msg
 
         if iteration_count >= max_iterations:
             logger.warning("Hit maximum tool call iterations")
-            return "⚠️ **System Error**: The conversation got stuck in a loop. Please start a new conversation."
+            error_msg = "⚠️ **System Error**: The conversation got stuck in a loop. Please start a new conversation."
+            if cfg.get('debug.show_prompts', False):
+                return error_msg, debug_prompt
+            return error_msg
 
         if not response:
             logger.error("No response generated")
-            return "🚨 **System Error**: Failed to generate a response. Please try again."
+            error_msg = "🚨 **System Error**: Failed to generate a response. Please try again."
+            if cfg.get('debug.show_prompts', False):
+                return error_msg, debug_prompt
+            return error_msg
 
         try:
             final_response = response.choices[0].message.content
             if not final_response:
-                return "⚠️ **Warning**: I generated an empty response. Please try rephrasing your question."
+                error_msg = "⚠️ **Warning**: I generated an empty response. Please try rephrasing your question."
+                if cfg.get('debug.show_prompts', False):
+                    return error_msg, debug_prompt
+                return error_msg
                 
             # Add RAG warning if retrieval failed but we continued
             if rag_context == "" and "RAG retrieval failed" in str(locals().get('e', '')):
                 final_response = "⚠️ *Note: Some background information may be unavailable due to a database issue.*\n\n" + final_response
-                
+            
+            if cfg.get('debug.show_prompts', False):
+                return final_response, debug_prompt
             return final_response
             
         except (KeyError, IndexError, AttributeError) as e:
             logger.error(f"Failed to extract response content: {e}")
-            return f"🚨 **Response Extraction Error**: {str(e)}\n\nPlease try again."
+            error_msg = f"🚨 **Response Extraction Error**: {str(e)}\n\nPlease try again."
+            if cfg.get('debug.show_prompts', False):
+                return error_msg, debug_prompt
+            return error_msg
             
     except Exception as e:
         # Catch-all for any other unexpected errors
@@ -447,12 +481,47 @@ def chat(message, history):
         error_msg = "🚨 **Unexpected System Error**: Something went wrong.\n"
         error_msg += f"Error details: {str(e)}\n\n"
         error_msg += "Please try again or refresh the page if the problem persists."
+        if cfg.get('debug.show_prompts', False):
+            return error_msg, ""
         return error_msg
 
 # Launch the Gradio interface
 try:
     logger.info("Starting Gradio interface...")
-    gr.ChatInterface(chat, type="messages").launch()
+    
+    # Check if debug mode is enabled
+    if cfg.get('debug.show_prompts', False):
+        logger.info("Debug mode enabled - showing prompt display")
+        
+        with gr.Blocks() as demo:
+            gr.Markdown(f"# Chat with {name}")
+            
+            with gr.Row():
+                with gr.Column(scale=2):
+                    chatbot = gr.Chatbot(type="messages", label="Chat")
+                    msg = gr.Textbox(label="Your message", placeholder="Type your message here...")
+                    
+                with gr.Column(scale=1):
+                    prompt_display = gr.Textbox(
+                        label="🔍 Debug: Full Prompt Sent to AI", 
+                        lines=20, 
+                        interactive=False,
+                        placeholder="The full prompt will appear here after you send a message..."
+                    )
+            
+            def respond(message, chat_history):
+                response, prompt = chat(message, chat_history)
+                chat_history.append({"role": "user", "content": message})
+                chat_history.append({"role": "assistant", "content": response})
+                return "", chat_history, prompt
+            
+            msg.submit(respond, [msg, chatbot], [msg, chatbot, prompt_display])
+        
+        demo.launch()
+    else:
+        # Normal mode without debug display
+        gr.ChatInterface(chat, type="messages").launch()
+        
 except Exception as e:
     logger.critical(f"Failed to launch Gradio interface: {e}")
     raise SystemExit("Cannot start web interface")

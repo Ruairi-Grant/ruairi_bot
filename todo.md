@@ -1,11 +1,4 @@
-todo
-
-## High Priority (Deployment Blockers)
-- **CRITICAL**: Remove unused debug code (lines 170-176 in ruairi_bot.py)
-
-
 ## Medium Priority (Code Quality)
-- change the routing, just include chunks from both
 - fix issues with thesis by adding thesis specific questions to the questions_db
 - add rate limiting
 - Split ruairi_bot.py into separate modules (embedding, chat, database)
@@ -31,3 +24,4 @@ todo
 - add introduction message and nice title
 - properly connect the hugginface space with the github repo
 - move backend elsewhere from huggingface so i can have better data file management
+- actually store missed questions as in the todos

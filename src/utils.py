@@ -30,14 +30,6 @@ def record_unknown_question(question):
         logger.error(f"Failed to record unknown question: {e}")
         return {"error": str(e)}
 
-def is_thesis_question(message: str) -> bool:
-    thesis_keywords = [
-        "thesis", "research", "paper", "experiment", "model", "simulation",
-        "hypothesis", "methodology", "dataset", "findings", "conclusion"
-    ]
-    message_lower = message.lower()
-    return any(keyword in message_lower for keyword in thesis_keywords)
-
 record_user_details_json = {
     "name": "record_user_details",
     "description": "Use this tool to record that a user is interested in being in touch and provided an email address",
@@ -127,12 +119,23 @@ def retrieve_from_qna(openai, user_message, database, top_k=None, threshold=None
         logger.debug("Q&A Search - Distances: %s", result['distances'])
         logger.debug("Q&A Search - Questions: %s", result['documents'])
 
-        if result['distances'][0][0] < threshold:
-            return result['metadatas'][0][0]['answer']
-        return ""  # No match found
+        # Always return the best match, but indicate if it's below threshold
+        if result['distances'][0]:
+            distance = result['distances'][0][0]
+            similarity = 1 - distance  # Convert distance to similarity
+            answer = result['metadatas'][0][0]['answer']
+            
+            # Check if it meets the threshold
+            if distance < threshold:
+                return answer, similarity, True  # True = meets threshold
+            else:
+                # Return anyway but mark as below threshold
+                return answer, similarity, False  # False = below threshold
+        
+        return "", None, False  # No results at all
     except Exception as e:
         logger.error(f"Q&A retrieval failed: {e}")
-        return ""
+        return "", None, False
     
 def retrieve_from_thesis(openai, user_message, database, top_k=None, threshold=None):
     if top_k is None:
@@ -152,23 +155,86 @@ def retrieve_from_thesis(openai, user_message, database, top_k=None, threshold=N
         logger.debug("Thesis Search - Found chunks: %d", len(result['documents'][0]))
 
         retrieved_chunks = []
+        chunk_scores = []
+        chunks_below_threshold = []
+        scores_below_threshold = []
+        
         for doc, score in zip(result['documents'][0], result['distances'][0]):
+            similarity = 1 - score
             if score < threshold:
+                # Above threshold - include these
                 retrieved_chunks.append(doc)
+                chunk_scores.append(similarity)
+            else:
+                # Below threshold - keep track separately
+                chunks_below_threshold.append(doc)
+                scores_below_threshold.append(similarity)
 
-        return "\n\n".join(retrieved_chunks)
+        # If we have good matches, return those
+        if retrieved_chunks:
+            return "\n\n".join(retrieved_chunks), chunk_scores, True
+        
+        # If no good matches, return the best available matches anyway
+        elif chunks_below_threshold:
+            return "\n\n".join(chunks_below_threshold), scores_below_threshold, False
+            
+        return "", [], False
     except Exception as e:
         logger.error(f"Thesis retrieval failed: {e}")
-        return ""
+        return "", [], False
 
 
 def retrieve_rag_context(openai, user_message, database, top_k=2):
-    if is_thesis_question(user_message):
-        logger.debug("Routing to thesis_chunks collection")
-        return retrieve_from_thesis(openai, user_message, database.get_collection("thesis_chunks"), top_k=top_k)
-    else:
-        logger.debug("Routing to qna collection")
-        return retrieve_from_qna(openai, user_message, database.get_collection("interview_qna"),  top_k=top_k)
+    logger.debug("Retrieving from both Q&A and thesis collections")
+    
+    # Get results from both collections
+    qna_result, qna_score, qna_meets_threshold = retrieve_from_qna(openai, user_message, database.get_collection("interview_qna"), top_k=top_k)
+    thesis_result, thesis_scores, thesis_meets_threshold = retrieve_from_thesis(openai, user_message, database.get_collection("thesis_chunks"), top_k=top_k)
+    
+    # Build prompt content (only include results that meet threshold)
+    prompt_results = []
+    
+    if qna_result and qna_meets_threshold:
+        prompt_results.append(f"## Interview Q&A:\n{qna_result}")
+    
+    if thesis_result and thesis_meets_threshold:
+        prompt_results.append(f"## Thesis Information:\n{thesis_result}")
+    
+    prompt_text = "\n\n".join(prompt_results) if prompt_results else ""
+    
+    # Build debug content (include everything with scores and warnings)
+    debug_results = []
+    
+    if qna_result:
+        if qna_score is not None:
+            threshold_marker = "" if qna_meets_threshold else " ⚠️ BELOW THRESHOLD"
+            qna_header = f"## Interview Q&A (similarity: {qna_score:.3f}{threshold_marker}):\n{qna_result}"
+        else:
+            qna_header = f"## Interview Q&A:\n{qna_result}"
+        debug_results.append(qna_header)
+        
+    if thesis_result:
+        if thesis_scores:
+            avg_score = sum(thesis_scores) / len(thesis_scores)
+            threshold_marker = "" if thesis_meets_threshold else " ⚠️ BELOW THRESHOLD"
+            thesis_header = f"## Thesis Information (avg similarity: {avg_score:.3f}, {len(thesis_scores)} chunks{threshold_marker}):\n{thesis_result}"
+        else:
+            thesis_header = f"## Thesis Information:\n{thesis_result}"
+        debug_results.append(thesis_header)
+    
+    debug_text = "\n\n".join(debug_results) if debug_results else ""
+    
+    # Return structured data
+    return {
+        "prompt_content": prompt_text,  # Clean content for AI model (only good matches)
+        "debug_content": debug_text,    # Full content with scores for debugging
+        "metadata": {
+            "qna_similarity": qna_score,
+            "qna_meets_threshold": qna_meets_threshold,
+            "thesis_similarities": thesis_scores,
+            "thesis_meets_threshold": thesis_meets_threshold
+        }
+    }
     
 def extract_text_from_pdf(pdf_path):
     reader = PdfReader(pdf_path)

@@ -40,6 +40,10 @@ logging:
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
   date_format: "%H:%M:%S"
 
+# Debug Configuration
+debug:
+  show_prompts: true  # Set to true to show full prompts in UI
+
 # File Paths (relative to project root)
 paths:
   data_dir: "me"
